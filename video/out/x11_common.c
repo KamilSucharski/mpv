@@ -1,18 +1,18 @@
 /*
  * This file is part of mpv.
  *
- * mpv is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * mpv is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * mpv is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * GNU Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with mpv.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <stdio.h>
@@ -67,55 +67,64 @@
 #include "input/input.h"
 #include "input/keycodes.h"
 
-#define vo_wm_LAYER 1
-#define vo_wm_FULLSCREEN 2
-#define vo_wm_STAYS_ON_TOP 4
-#define vo_wm_ABOVE 8
-#define vo_wm_BELOW 16
-#define vo_wm_STICKY 32
-#define vo_wm_SKIP_TASKBAR 64
+// Window manager capability flags
+enum {
+    WM_CAP_LAYER       = 1 << 0,
+    WM_CAP_FULLSCREEN  = 1 << 1,
+    WM_CAP_STAYS_ON_TOP = 1 << 2,
+    WM_CAP_ABOVE       = 1 << 3,
+    WM_CAP_BELOW       = 1 << 4,
+    WM_CAP_STICKY      = 1 << 5,
+    WM_CAP_SKIP_TASKBAR = 1 << 6,
+};
 
-/* EWMH state actions, see
-         http://freedesktop.org/Standards/wm-spec/index.html#id2768769 */
-#define NET_WM_STATE_REMOVE        0    /* remove/unset property */
-#define NET_WM_STATE_ADD           1    /* add/set property */
-#define NET_WM_STATE_TOGGLE        2    /* toggle property  */
+// EWMH state change actions
+enum {
+    EWMH_STATE_REMOVE = 0,
+    EWMH_STATE_ADD    = 1,
+    EWMH_STATE_TOGGLE = 2,
+};
 
-#define WIN_LAYER_ONBOTTOM               2
-#define WIN_LAYER_NORMAL                 4
-#define WIN_LAYER_ONTOP                  6
-#define WIN_LAYER_ABOVE_DOCK             10
+// Legacy window layer values
+enum {
+    LAYER_BOTTOM     = 2,
+    LAYER_NORMAL     = 4,
+    LAYER_TOP        = 6,
+    LAYER_ABOVE_DOCK = 10,
+};
 
-#define DND_VERSION 5
+// Drag and drop protocol version
+#define XDND_PROTOCOL_VERSION 5
 
-#define XEMBED_VERSION              0
-#define XEMBED_MAPPED               (1 << 0)
-#define XEMBED_EMBEDDED_NOTIFY      0
-#define XEMBED_REQUEST_FOCUS        3
+// XEmbed protocol constants
+#define XEMBED_PROTO_VERSION    0
+#define XEMBED_FLAG_MAPPED      (1 << 0)
+#define XEMBED_MSG_EMBEDDED     0
+#define XEMBED_MSG_FOCUS_REQ    3
 
-// ----- Motif header: -------
-
-#define MWM_HINTS_FUNCTIONS     (1L << 0)
-#define MWM_HINTS_DECORATIONS   (1L << 1)
-
-#define MWM_FUNC_RESIZE         (1L << 1)
-#define MWM_FUNC_MOVE           (1L << 2)
-#define MWM_FUNC_MINIMIZE       (1L << 3)
-#define MWM_FUNC_MAXIMIZE       (1L << 4)
-#define MWM_FUNC_CLOSE          (1L << 5)
-
-// Equals to all MWM_DECOR_* OR'd together.
-#define MWM_DECOR_ALL           126
-#define MWM_DECOR_TITLE         (1L << 3)
-
-typedef struct
-{
-    long flags;
-    long functions;
-    long decorations;
+// Motif window hints structure
+typedef struct {
+    long hint_flags;
+    long func_flags;
+    long decor_flags;
     long input_mode;
     long state;
-} MotifWmHints;
+} MotifHints;
+
+// Motif hint flags
+#define MOTIF_HINT_FUNCTIONS   (1L << 0)
+#define MOTIF_HINT_DECORATIONS (1L << 1)
+
+// Motif function flags
+#define MOTIF_FUNC_RESIZE   (1L << 1)
+#define MOTIF_FUNC_MOVE     (1L << 2)
+#define MOTIF_FUNC_MINIMIZE (1L << 3)
+#define MOTIF_FUNC_MAXIMIZE (1L << 4)
+#define MOTIF_FUNC_CLOSE    (1L << 5)
+
+// Motif decoration flags
+#define MOTIF_DECOR_ALL   126
+#define MOTIF_DECOR_TITLE (1L << 3)
 
 static const char x11_icon_16[] =
 #include "etc/mpv-icon-8bit-16x16.png.inc"
@@ -259,7 +268,7 @@ static void x11_send_ewmh_msg(struct vo_x11_state *x11, char *message_type,
 static void x11_set_ewmh_state(struct vo_x11_state *x11, char *state, bool set)
 {
     long params[5] = {
-        set ? NET_WM_STATE_ADD : NET_WM_STATE_REMOVE,
+        set ? EWMH_STATE_ADD : EWMH_STATE_REMOVE,
         XInternAtom(x11->display, state, False),
         0, // No second state
         1, // source indication: normal
@@ -329,19 +338,30 @@ void vo_x11_silence_xlib(int dir)
 
 static int net_wm_support_state_test(struct vo_x11_state *x11, Atom atom)
 {
-#define NET_WM_STATE_TEST(x) { \
-    if (atom == XA(x11, _NET_WM_STATE_##x)) { \
-        MP_DBG(x11, "Detected wm supports " #x " state.\n" ); \
-        return vo_wm_##x; \
-    } \
-}
-
-    NET_WM_STATE_TEST(FULLSCREEN);
-    NET_WM_STATE_TEST(ABOVE);
-    NET_WM_STATE_TEST(STAYS_ON_TOP);
-    NET_WM_STATE_TEST(BELOW);
-    NET_WM_STATE_TEST(STICKY);
-    NET_WM_STATE_TEST(SKIP_TASKBAR);
+    if (atom == XA(x11, _NET_WM_STATE_FULLSCREEN)) {
+        MP_DBG(x11, "Detected wm supports FULLSCREEN state.\n");
+        return WM_CAP_FULLSCREEN;
+    }
+    if (atom == XA(x11, _NET_WM_STATE_ABOVE)) {
+        MP_DBG(x11, "Detected wm supports ABOVE state.\n");
+        return WM_CAP_ABOVE;
+    }
+    if (atom == XA(x11, _NET_WM_STATE_STAYS_ON_TOP)) {
+        MP_DBG(x11, "Detected wm supports STAYS_ON_TOP state.\n");
+        return WM_CAP_STAYS_ON_TOP;
+    }
+    if (atom == XA(x11, _NET_WM_STATE_BELOW)) {
+        MP_DBG(x11, "Detected wm supports BELOW state.\n");
+        return WM_CAP_BELOW;
+    }
+    if (atom == XA(x11, _NET_WM_STATE_STICKY)) {
+        MP_DBG(x11, "Detected wm supports STICKY state.\n");
+        return WM_CAP_STICKY;
+    }
+    if (atom == XA(x11, _NET_WM_STATE_SKIP_TASKBAR)) {
+        MP_DBG(x11, "Detected wm supports SKIP_TASKBAR state.\n");
+        return WM_CAP_SKIP_TASKBAR;
+    }
     return 0;
 }
 
@@ -364,7 +384,7 @@ static int vo_wm_detect(struct vo *vo)
         for (i = 0; i < nitems; i++) {
             if (args[i] == XA(x11, _WIN_LAYER)) {
                 MP_DBG(x11, "Detected wm supports layers.\n");
-                wm |= vo_wm_LAYER;
+                wm |= WM_CAP_LAYER;
             }
         }
         XFree(args);
@@ -385,9 +405,9 @@ static int vo_wm_detect(struct vo *vo)
 
     if (wm == 0)
         MP_DBG(x11, "Unknown wm type...\n");
-    if (x11->opts->x11_netwm > 0 && !(wm & vo_wm_FULLSCREEN)) {
+    if (x11->opts->x11_netwm > 0 && !(wm & WM_CAP_FULLSCREEN)) {
         MP_WARN(x11, "Forcing NetWM FULLSCREEN support.\n");
-        wm |= vo_wm_FULLSCREEN;
+        wm |= WM_CAP_FULLSCREEN;
     }
     return wm;
 }
@@ -847,7 +867,7 @@ static void vo_x11_decoration(struct vo *vo, bool decorations, bool title_bar)
         return;
 
     Atom motif_hints = XA(x11, _MOTIF_WM_HINTS);
-    MotifWmHints mhints = {0};
+    MotifHints mhints = {0};
     bool got = x11_get_property_copy(x11, x11->window, motif_hints,
                                      motif_hints, 32, &mhints, sizeof(mhints));
     // If hints weren't set, and decorations and title bar requested,
@@ -855,13 +875,13 @@ static void vo_x11_decoration(struct vo *vo, bool decorations, bool title_bar)
     if (!got && decorations && title_bar)
         return;
     if (!got) {
-        mhints.flags = MWM_HINTS_FUNCTIONS;
-        mhints.functions = MWM_FUNC_MOVE | MWM_FUNC_CLOSE | MWM_FUNC_MINIMIZE |
-                           MWM_FUNC_MAXIMIZE | MWM_FUNC_RESIZE;
+        mhints.hint_flags = MOTIF_HINT_FUNCTIONS;
+        mhints.func_flags = MOTIF_FUNC_MOVE | MOTIF_FUNC_CLOSE | MOTIF_FUNC_MINIMIZE |
+                            MOTIF_FUNC_MAXIMIZE | MOTIF_FUNC_RESIZE;
     }
-    mhints.flags |= MWM_HINTS_DECORATIONS;
-    mhints.decorations = decorations ? MWM_DECOR_ALL : 0;
-    mhints.decorations &= ~(!title_bar ? MWM_DECOR_TITLE : 0);
+    mhints.hint_flags |= MOTIF_HINT_DECORATIONS;
+    mhints.decor_flags = decorations ? MOTIF_DECOR_ALL : 0;
+    mhints.decor_flags &= ~(!title_bar ? MOTIF_DECOR_TITLE : 0);
     XChangeProperty(x11->display, x11->window, motif_hints, motif_hints, 32,
                     PropModeReplace, (unsigned char *) &mhints, 5);
 }
@@ -931,7 +951,7 @@ static void vo_x11_dnd_init_window(struct vo *vo)
 {
     struct vo_x11_state *x11 = vo->x11;
 
-    Atom version = DND_VERSION;
+    Atom version = XDND_PROTOCOL_VERSION;
     XChangeProperty(x11->display, x11->window, XA(x11, XdndAware), XA_ATOM,
                     32, PropModeReplace, (unsigned char *)&version, 1);
 }
@@ -1142,7 +1162,7 @@ static void vo_x11_check_net_wm_state_change(struct vo *vo)
     if (x11->parent)
         return;
 
-    if (x11->wm_type & vo_wm_FULLSCREEN) {
+    if (x11->wm_type & WM_CAP_FULLSCREEN) {
         int num_elems;
         long *elems = x11_get_property(x11, x11->window, XA(x11, _NET_WM_STATE),
                                        XA_ATOM, 32, &num_elems);
@@ -1328,7 +1348,7 @@ void vo_x11_check_events(struct vo *vo)
             mp_input_put_key(x11->input_ctx,
                              (MP_MBTN_BASE + Event.xbutton.button - 1) |
                              get_mods(Event.xbutton.state) | MP_KEY_STATE_DOWN);
-            long msg[4] = {XEMBED_REQUEST_FOCUS};
+            long msg[4] = {XEMBED_MSG_FOCUS_REQ};
             vo_x11_xembed_send_message(x11, msg);
             x11->last_button_event = Event;
             break;
@@ -1522,7 +1542,7 @@ static void vo_x11_xembed_update(struct vo_x11_state *x11, int flags)
     if (!x11->window || !x11->parent)
         return;
 
-    long xembed_info[] = {XEMBED_VERSION, flags};
+    long xembed_info[] = {XEMBED_PROTO_VERSION, flags};
     Atom name = XA(x11, _XEMBED_INFO);
     XChangeProperty(x11->display, x11->window, name, name, 32,
                     PropModeReplace, (char *)xembed_info, 2);
@@ -1535,7 +1555,7 @@ static void vo_x11_xembed_handle_message(struct vo *vo, XClientMessageEvent *ce)
         return;
 
     long msg = ce->data.l[1];
-    if (msg == XEMBED_EMBEDDED_NOTIFY)
+    if (msg == XEMBED_MSG_EMBEDDED)
         MP_VERBOSE(x11, "Parent windows supports XEmbed.\n");
 }
 
@@ -1662,7 +1682,7 @@ static void vo_x11_map_window(struct vo *vo, struct mp_rect rc)
     vo_x11_move_resize(vo, true, true, rc);
     vo_x11_decoration(vo, x11->opts->border, x11->opts->title_bar);
 
-    if (x11->opts->fullscreen && (x11->wm_type & vo_wm_FULLSCREEN)) {
+    if (x11->opts->fullscreen && (x11->wm_type & WM_CAP_FULLSCREEN)) {
         Atom state = XA(x11, _NET_WM_STATE_FULLSCREEN);
         XChangeProperty(x11->display, x11->window, XA(x11, _NET_WM_STATE), XA_ATOM,
                         32, PropModeAppend, (unsigned char *)&state, 1);
@@ -1686,7 +1706,7 @@ static void vo_x11_map_window(struct vo *vo, struct mp_rect rc)
     }
 
     if (x11->opts->all_workspaces) {
-        if (x11->wm_type & vo_wm_STICKY) {
+        if (x11->wm_type & WM_CAP_STICKY) {
             Atom state = XA(x11, _NET_WM_STATE_STICKY);
             XChangeProperty(x11->display, x11->window, XA(x11, _NET_WM_STATE), XA_ATOM,
                             32, PropModeReplace, (unsigned char *)&state, 1);
@@ -1721,10 +1741,10 @@ static void vo_x11_map_window(struct vo *vo, struct mp_rect rc)
     if (x11->opts->window_minimized) // don't override WM default on "no"
         vo_x11_minimize(vo);
 
-    if (x11->opts->fullscreen && (x11->wm_type & vo_wm_FULLSCREEN))
+    if (x11->opts->fullscreen && (x11->wm_type & WM_CAP_FULLSCREEN))
         x11_set_ewmh_state(x11, "_NET_WM_STATE_FULLSCREEN", 1);
 
-    vo_x11_xembed_update(x11, XEMBED_MAPPED);
+    vo_x11_xembed_update(x11, XEMBED_FLAG_MAPPED);
 }
 
 static void vo_x11_highlevel_resize(struct vo *vo, struct mp_rect rc, bool force)
@@ -1846,7 +1866,7 @@ void vo_x11_config_vo_window(struct vo *vo)
 static void vo_x11_sticky(struct vo *vo, bool sticky)
 {
     struct vo_x11_state *x11 = vo->x11;
-    if (x11->wm_type & vo_wm_STICKY) {
+    if (x11->wm_type & WM_CAP_STICKY) {
         x11_set_ewmh_state(x11, "_NET_WM_STATE_STICKY", sticky);
     } else {
         long params[5] = {0xFFFFFFFF, 1};
@@ -1866,20 +1886,20 @@ static void vo_x11_setlayer(struct vo *vo, bool ontop)
     if (x11->parent || !x11->window)
         return;
 
-    if (x11->wm_type & (vo_wm_STAYS_ON_TOP | vo_wm_ABOVE)) {
+    if (x11->wm_type & (WM_CAP_STAYS_ON_TOP | WM_CAP_ABOVE)) {
         char *state = "_NET_WM_STATE_ABOVE";
 
         // Not in EWMH - but the old code preferred this (maybe it is "better")
-        if (x11->wm_type & vo_wm_STAYS_ON_TOP)
+        if (x11->wm_type & WM_CAP_STAYS_ON_TOP)
             state = "_NET_WM_STATE_STAYS_ON_TOP";
 
         x11_set_ewmh_state(x11, state, ontop);
 
         MP_VERBOSE(x11, "NET style stay on top (%d). Using state %s.\n",
                    ontop, state);
-    } else if (x11->wm_type & vo_wm_LAYER) {
+    } else if (x11->wm_type & WM_CAP_LAYER) {
         if (!x11->orig_layer) {
-            x11->orig_layer = WIN_LAYER_NORMAL;
+            x11->orig_layer = LAYER_NORMAL;
             x11_get_property_copy(x11, x11->window, XA(x11, _WIN_LAYER),
                                   XA_CARDINAL, 32, &x11->orig_layer, sizeof(long));
             MP_VERBOSE(x11, "original window layer is %ld.\n", x11->orig_layer);
@@ -1887,7 +1907,7 @@ static void vo_x11_setlayer(struct vo *vo, bool ontop)
 
         long params[5] = {0};
         // if not fullscreen, stay on default layer
-        params[0] = ontop ? WIN_LAYER_ABOVE_DOCK : x11->orig_layer;
+        params[0] = ontop ? LAYER_ABOVE_DOCK : x11->orig_layer;
         params[1] = CurrentTime;
         MP_VERBOSE(x11, "Layered style stay on top (layer %ld).\n", params[0]);
         x11_send_ewmh_msg(x11, "_WIN_LAYER", params);
@@ -1900,7 +1920,7 @@ static void vo_x11_set_in_taskbar(struct vo *vo, bool in)
     if (x11->parent || !x11->window)
         return;
 
-    if (x11->wm_type & (vo_wm_SKIP_TASKBAR)) {
+    if (x11->wm_type & (WM_CAP_SKIP_TASKBAR)) {
         char *state = "_NET_WM_STATE_SKIP_TASKBAR";
         x11_set_ewmh_state(x11, state, !in);
         MP_VERBOSE(x11, "NET style set skip taskbar (%d).\n", !in);
@@ -1971,7 +1991,7 @@ static void vo_x11_fullscreen(struct vo *vo)
 
     struct mp_rect rc = x11->nofsrc;
 
-    if (x11->wm_type & vo_wm_FULLSCREEN) {
+    if (x11->wm_type & WM_CAP_FULLSCREEN) {
         x11_set_ewmh_state(x11, "_NET_WM_STATE_FULLSCREEN", x11->fs);
         if (!x11->fs && (x11->pos_changed_during_fs ||
                          x11->size_changed_during_fs))
@@ -2036,7 +2056,7 @@ static void vo_x11_maximize(struct vo *vo)
     struct vo_x11_state *x11 = vo->x11;
 
     long params[5] = {
-        x11->opts->window_maximized ? NET_WM_STATE_ADD : NET_WM_STATE_REMOVE,
+        x11->opts->window_maximized ? EWMH_STATE_ADD : EWMH_STATE_REMOVE,
         XA(x11, _NET_WM_STATE_MAXIMIZED_VERT),
         XA(x11, _NET_WM_STATE_MAXIMIZED_HORZ),
         1, // source indication: normal

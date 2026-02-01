@@ -1080,10 +1080,7 @@ if features['dmabuf-wayland']
     sources += files('video/out/wldmabuf/ra_wldmabuf.c')
 endif
 
-x11_opt = get_option('x11').require(
-    get_option('gpl'),
-    error_message: 'the build is not GPL!',
-)
+x11_opt = get_option('x11')
 x11 = {
     'deps': [dependency('x11', version: '>= 1.0.0', required: x11_opt),
              dependency('xscrnsaver', version: '>= 1.0.0', required: x11_opt),
